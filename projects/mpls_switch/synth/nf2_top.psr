@@ -1,0 +1,54 @@
+Release 10.1.03 Physical Synthesis Report K.39 (lin64)
+Copyright (c) 1995-2007 Xilinx, Inc. All rights reserved.
+
+TABLE OF CONTENTS
+  1) Physical Synthesis Options Summary
+  2) Optimizations statistics and details
+
+
+=========================================================================
+*                 Physical Synthesis Options Summary                    *
+=========================================================================
+---- Options
+Global Optimization                 : OFF
+    Retiming                        : OFF
+    Equivalent Register Removal     : OFF
+Timing-Driven Packing and Placement : ON
+    Logic Optimization              : OFF
+    Register Duplication            : ON
+
+---- Target Parameters
+Target Device                       : 2vp50ff1152-7
+
+=========================================================================
+
+
+=========================================================================
+*                        Optimizations                                  *
+=========================================================================
+---- Statistics
+   Number of registers added by Replication                  | 13              
+
+   Overall change in number of registers                     | +13              
+
+
+---- Details
+
+New or modified components                             | Optimization             | Objective           
+-------------------------------------------------------|--------------------------|----------------------
+nf2_core/sram64.sram_arbiter/cnet_sram_sm/sram_addr_0_REPLICA_6| Replication              | Fanout Optimization
+nf2_core/sram64.sram_arbiter/cnet_sram_sm/sram_addr_10_REPLICA_12| Replication              | Fanout Optimization
+nf2_core/sram64.sram_arbiter/cnet_sram_sm/sram_addr_11_REPLICA_10| Replication              | Fanout Optimization
+nf2_core/sram64.sram_arbiter/cnet_sram_sm/sram_addr_12_REPLICA_11| Replication              | Fanout Optimization
+nf2_core/sram64.sram_arbiter/cnet_sram_sm/sram_addr_13_REPLICA_9| Replication              | Fanout Optimization
+nf2_core/sram64.sram_arbiter/cnet_sram_sm/sram_addr_14_REPLICA_7| Replication              | Fanout Optimization
+nf2_core/sram64.sram_arbiter/cnet_sram_sm/sram_addr_15_REPLICA_5| Replication              | Fanout Optimization
+nf2_core/sram64.sram_arbiter/cnet_sram_sm/sram_addr_16_REPLICA_4| Replication              | Fanout Optimization
+nf2_core/sram64.sram_arbiter/cnet_sram_sm/sram_addr_17_REPLICA_3| Replication              | Fanout Optimization
+nf2_core/sram64.sram_arbiter/cnet_sram_sm/sram_addr_1_REPLICA_1| Replication              | Fanout Optimization
+nf2_core/sram64.sram_arbiter/cnet_sram_sm/sram_addr_2_REPLICA_0| Replication              | Fanout Optimization
+nf2_core/sram64.sram_arbiter/cnet_sram_sm/sram_addr_3_REPLICA_8| Replication              | Fanout Optimization
+nf2_core/sram64.sram_arbiter/cnet_sram_sm/sram_addr_5_REPLICA_2| Replication              | Fanout Optimization
+
+
+

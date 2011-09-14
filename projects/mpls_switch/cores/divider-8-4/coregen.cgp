@@ -1,0 +1,20 @@
+# Date: Mon May  9 21:39:28 2011
+SET addpads = False
+SET asysymbol = False
+SET busformat = BusFormatAngleBracketNotRipped
+SET createndf = False
+SET designentry = Verilog
+SET device = xc2vp50
+SET devicefamily = virtex2p
+SET flowvendor = Other
+SET formalverification = False
+SET foundationsym = False
+SET implementationfiletype = Ngc
+SET package = ff1152
+SET removerpms = False
+SET simulationfiles = Structural
+SET speedgrade = -7
+SET verilogsim = True
+SET vhdlsim = False
+SET workingdirectory = /home/ajith/netfpga/projects/mpls_switch/cores/divider/tmp
+

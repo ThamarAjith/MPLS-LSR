@@ -1,0 +1,12 @@
+Welcome to Xilinx CORE Generator.
+Wrote project file
+/home/ajith/netfpga/projects/mpls_switch/cores/divider-4-4/coregen.cgp.
+Customizing IP...
+Finished Customizing.
+Generating IP...
+Generating Implementation files.
+Generating NGC file.
+Generating Verilog structural model.
+Finished Generating.
+Successfully generated div_gen_v1_0.
+Closed project file.

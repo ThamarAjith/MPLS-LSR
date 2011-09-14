@@ -1,0 +1,8 @@
+# Output products list for <div_gen_v1_0>
+div_gen_v1_0.ngc
+div_gen_v1_0.v
+div_gen_v1_0.veo
+div_gen_v1_0.xco
+div_gen_v1_0_div_gen_v1_0_xst_1.ngc_xst.xrpt
+div_gen_v1_0_flist.txt
+div_gen_v1_0_xmdf.tcl

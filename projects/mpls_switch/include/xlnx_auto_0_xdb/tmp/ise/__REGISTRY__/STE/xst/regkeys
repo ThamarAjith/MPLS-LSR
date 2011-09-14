@@ -1,0 +1,6 @@
+CommandLine
+/opt/Xilinx/10.1/ISE/bin/lin/unwrapped/xst -ifn /home/ajith/netfpga/projects/mpls_switch/cores/divider-4-4/tmp/_cg/_bbx/div_gen_v1_0_div_gen_v1_0_xst_1.scr -ofn /home/ajith/netfpga/projects/mpls_switch/cores/divider-4-4/tmp/_cg/_bbx/div_gen_v1_0_div_gen_v1_0_xst_1_xst.log -intstyle silent -finalclean 1
+s
+FormatString
+xst [-ifn <InputFile>] [-ofn <OutputFile>] [-ise <iseProjectFile>] [--quiet] [-intstyle <Style>] [--deb <DebugLevel>] [--finalclean <Clean>] [--PcubeFlow] [--globOptFlow] [--XstNtrc]
+s

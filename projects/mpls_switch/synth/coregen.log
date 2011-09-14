@@ -1,0 +1,20 @@
+Welcome to Xilinx CORE Generator.
+Wrote project file /home/ajith/Desktop/back/core/tcam/coregen.cgp.
+Customizing IP...
+60: Engine "clearlooks" is unsupported, ignoring
+ERROR:coreutil - Must enter a value for <Component Name>
+Cancelled Customization.
+Customizing IP...
+60: Engine "clearlooks" is unsupported, ignoring
+ERROR:coreutil - Must enter a value for <Component Name>
+Finished Customizing.
+Generating IP...
+xst log file
+/home/ajith/Desktop/back/core/tcam/tmp/_cg/_bbx/tcam_cam_input_1_xst.log cannot
+be accessed.
+ERROR:coreutil - Exception caught when running XST synthesis!
+Removing temporary files, this may take up to 60 seconds.Cancelled Generation.
+Customizing IP...
+60: Engine "clearlooks" is unsupported, ignoring
+Cancelled Customization.
+Closed project file.

@@ -1,0 +1,1 @@
+gcc -o lsr ../../../lib/C/common/libnf2.so  lsr.c

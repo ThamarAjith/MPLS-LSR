@@ -1,0 +1,648 @@
+//
+// Module: ethernet_parser_64bit.v
+// Project: NF2.1
+// Description: parses the Ethernet header for a 64 bit datapath
+//
+///////////////////////////////////////////////////////////////////////////////
+`timescale 1ns/1ps
+`define IO_QUEUE_STAGE_NUM   8'hff
+`define IOQ_SRC_PORT_POS     16
+
+  module ethernet_parser
+    #(parameter DATA_WIDTH = 64,
+      parameter CTRL_WIDTH=DATA_WIDTH/8,
+      parameter NUM_IQ_BITS = 3,
+      parameter INPUT_ARBITER_STAGE_NUM = 2
+      )
+   (// --- Interface to the previous stage
+    input  [DATA_WIDTH-1:0]            in_data,
+    input  [CTRL_WIDTH-1:0]            in_ctrl,
+    input                              in_wr,
+
+    // --- Interface to output_port_lookup
+    output reg [47:0]                  dst_mac,
+    output reg [47:0]                  src_mac,
+    output reg [15:0]                  ethertype,
+    output reg                         eth_done,
+    output reg [NUM_IQ_BITS-1:0]       src_port,
+    output reg [18:0]                  rd_0_addr,
+	 input  [71:0]                      rd_0_data,
+    output reg                         rd_0_req,
+    input                              rd_0_ack,
+	 input                              rd_0_vld,
+    output reg [15:0]                  udp_src_port,
+    output reg [15:0]                  udp_dst_port,
+    output reg                         write_pkt_found,
+    output reg [71:0]                  mplsword,
+	 output reg                         mplsword_read_done,
+	 output [18:0]                      counter_write_add,
+	 output reg                         bram_read_req,
+	 input                              br_read_valid,
+	 output reg [47:0]                  bram_dst_mac,
+	 input [47:0]                       mac_add_out,
+	 output reg [7:0]                   bram_read_add_next,
+	 output reg                         pkt_stat_fifo_wr,
+    input [47:0]                       mac_0,   
+    input [47:0]                       mac_1,    
+    input [47:0]                       mac_2,  
+    input [47:0]                       mac_3,
+    output reg                         is_for_us,
+	 output reg                         is_mpls_unicast,
+	 input                              pkt_stat_fifo_full,
+	 output reg                         parity_error_latch,
+    output reg [7:0]                  ttl_out, 
+	 output reg [18:0]                  mplstag1_add,
+	 output                            pkt_byte_empty,
+	 input                             pkt_byte_rd_en,
+	 output[15:0]                      pkt_byte_len,
+	 output                            ld_error,
+// --- Misc
+
+    input                              reset,
+    input                              clk
+   );
+
+wire fifo_nearly_full;
+reg     pkt_byte_wr;
+reg[15:0]   pkt_byte_len_in;
+
+fallthrough_small_fifo
+     #(.WIDTH(16),
+       .MAX_DEPTH_BITS(4))
+   pkt_byte_fifo
+     (.dout(pkt_byte_len),
+      .full(),
+     // .prog_full (),
+      .nearly_full(fifo_nearly_full),
+      .empty(pkt_byte_empty),
+      .din(pkt_byte_len_in),
+      .wr_en(pkt_byte_wr),
+      .rd_en (pkt_byte_rd_en),
+      .reset(reset),
+      .clk(clk));
+
+   // ------------ Internal Params --------
+
+   parameter NUM_STATES  = 4;
+   parameter READ_WORD_1 = 0;
+   parameter READ_WORD_2 = 1;
+	parameter READ_WORD_3 = 2;
+   parameter READ_WORD_4 = 3;
+	parameter READ_WORD_5 = 4;
+	parameter READ_WORD_6 = 5;
+   parameter READ_WORD_7 = 6;
+   parameter READ_WORD_ip1 = 7;
+	parameter READ_WORD_ip2 = 8;
+	parameter READ_WORD_ip3 = 9;
+	parameter READ_WORD_ip4 = 10;
+	parameter WAIT_EOP    = 11 ;
+
+   // ------------- Regs/ wires -----------
+
+   reg [NUM_STATES-1:0]                state;
+   reg [NUM_STATES-1:0]                state_next;
+
+   reg [47:0]                          dst_mac_next;
+   reg [47:0]                          src_mac_next;
+   reg [31:0]                          mplstag1_next,mplstag1;
+   reg                                 mplstag1done;
+   reg [15:0]                          ethertype_next;
+   reg                                 eth_done_next;
+   reg [NUM_IQ_BITS-1:0]               src_port_next;
+   reg [1:0]                           numtag;
+   reg                                 eotfound,eotfound_next,eotnotfound;
+   reg [31:0]                          src_ip,dst_ip,src_ip_next,dst_ip_next;
+   reg                                 udpfound,is_for_us_next;
+   reg [15:0]                          udp_src_port_next,udp_dst_port_next;
+	wire                                tag_fifo_empty;
+	reg                                 tag_fifo_rd_en, label_read_count,label_read_count_next,pkt_stat_fifo_wr1;
+	reg [71:0]                          mplsword_next;
+	reg [18:0]                          rd_0_addd;
+	reg [47:0]                          bram_dst_mac_next;
+	reg[7:0]                            bram_read_add;
+	reg                                 write_pkt_found1;  
+	wire [31:0]                         hash1;
+	wire [15:0]                         hash2;
+	wire [7:0]                          hash3;
+	wire [3:0]                          hash4;
+	wire [7:0]                          parity_word;
+	wire                                parity_error;
+	reg                                 parity_error_latch_next,ld_error_next;
+	reg [7:0]                          ttl_out_next;
+		
+		
+   // ------------ Logic ----------------
+
+   assign  hash1 = src_ip ^ dst_ip;
+	assign  hash2 = hash1[31:16] ^ hash1[15:0];
+	assign  hash3 = hash2[15:8] ^ hash2[7:0];
+	assign  hash4 = hash3[7:4] ^ hash3[3:0];
+	
+	generate
+      genvar 	i;
+      for (i=7; i>=0; i=i-1) begin: test
+	 assign parity_word[i] = ^{rd_0_data[i],rd_0_data[(((i+1)*8)+7):((i+1)*8)]};
+      end
+   endgenerate
+	
+	assign parity_error = ^parity_word;
+ 
+   always @(*) begin
+      dst_mac_next     = dst_mac;
+      src_mac_next     = src_mac;
+      mplstag1_next    = mplstag1;
+		mplstag1done     = 0;
+      ethertype_next   = ethertype;
+      eth_done_next    = eth_done;
+      src_port_next    = src_port;
+      state_next       = state;
+		eotfound_next    = eotfound;
+		src_ip_next      = src_ip;
+		dst_ip_next      = dst_ip;
+      udp_src_port_next = udp_src_port;
+      udp_dst_port_next = udp_dst_port;
+		pkt_stat_fifo_wr1 = 0;
+		is_for_us_next = is_for_us;
+		write_pkt_found1 =0;
+		ttl_out_next     = ttl_out;
+	   pkt_byte_wr      = 0;
+
+	
+      case(state)
+        /* read the input source header and get the first word */
+        READ_WORD_1: begin
+           if(in_wr && in_ctrl==`IO_QUEUE_STAGE_NUM) begin
+              src_port_next = in_data[`IOQ_SRC_PORT_POS + NUM_IQ_BITS - 1 : `IOQ_SRC_PORT_POS];
+				  pkt_byte_len_in = in_data[15:0];
+				  eotnotfound = 0;
+           end
+           else if(in_wr && in_ctrl==0) begin
+              dst_mac_next          = in_data[63:16] ;
+              src_mac_next[47:32]   = in_data[15:0] ;
+              state_next            = READ_WORD_2;
+           end
+        end // case: READ_WORD_1
+
+        READ_WORD_2: begin
+           if(in_wr) begin
+	           src_mac_next[31:0]   = in_data[63:32] ;
+              if(dst_mac==mac_0 || dst_mac==mac_1 || dst_mac==mac_2 ||dst_mac==mac_3 || dst_mac[40])begin
+				    is_for_us_next=1;
+				  end
+              else begin
+				    is_for_us_next=0;
+              end				  
+              if(in_data[31:16]==16'h8847) begin             //mpls
+	            mplstag1_next[31:16] = in_data[15:0] ;
+				   if(!fifo_nearly_full)begin
+				       pkt_byte_wr      = 1;
+				   end
+					state_next            = READ_WORD_3;
+              end
+              else if (in_data[31:16]==16'h0800) begin             //ip packet
+                    state_next            = READ_WORD_ip1;
+                    
+              end
+              else begin
+                 state_next            = WAIT_EOP;
+              end
+	           ethertype_next        = in_data[31:16];
+              eth_done_next         = 1;
+				    
+           end
+        end
+		  
+		  READ_WORD_3: begin
+           if(in_wr) begin
+			  
+              if(ethertype_next==16'h8847) begin
+					   mplstag1_next[15:0] = in_data[63:48];
+						ttl_out_next = in_data[55:48];
+						mplstag1done = 1;
+						if (in_data[56] == 1) begin
+						   numtag = 2'h0;
+							eotfound_next=1;
+						end
+						else if (in_data[56] == 0 && in_data[24] == 1) begin
+						   numtag = 2'h1;
+							eotfound_next=1;
+						end
+						state_next            = READ_WORD_4;
+				  end
+				  else begin
+				      state_next            = WAIT_EOP;
+				  end
+           end
+        end
+		  
+		    READ_WORD_4: begin
+           if(in_wr) begin
+              if(ethertype_next==16'h8847 && eotfound_next==0) begin
+					   if (in_data[56] == 1) begin
+						   numtag = 2'h2;
+							eotfound_next=1;
+						end
+						else if (in_data[56] == 0 && in_data[24] == 1) begin
+						   numtag = 2'h3;
+							eotfound_next=1;
+						end
+						else  begin
+						   eotnotfound=1;
+						end
+				  end
+				  else if(eotfound_next==1 && numtag == 2'h0) begin
+				      src_ip_next[31:16] = in_data[15:0];
+				  end
+				  state_next            = READ_WORD_5;
+           end
+        end
+
+          READ_WORD_5: begin
+           if(in_wr) begin
+              if(ethertype_next==16'h8847 && eotnotfound) begin
+					   state_next            = WAIT_EOP;
+				  end
+				  else if(eotfound_next==1 && numtag == 2'h0) begin
+				      src_ip_next[15:0] = in_data[63:48];
+						dst_ip_next[31:0] = in_data[47:16];
+						state_next            = WAIT_EOP;
+				  end
+				  else if(eotfound_next==1 && numtag == 2'h1) begin
+				      src_ip_next[31:0] = in_data[47:16];
+						dst_ip_next[31:16] = in_data[15:0];
+						state_next            = READ_WORD_6;
+				  end
+				  else if(eotfound_next==1 && numtag == 2'h2) begin
+				      src_ip_next[31:16] = in_data[15:0];
+						state_next            = READ_WORD_6;
+				  end
+				  else begin
+				      state_next            = READ_WORD_6;
+				  end
+				  
+           end
+        end
+		  
+		   READ_WORD_6: begin
+           if(in_wr) begin
+              if(eotfound_next==1 && numtag == 2'h1) begin
+				      dst_ip_next[15:0] = in_data[63:48];
+					   state_next            = WAIT_EOP;
+				  end
+				  else if(eotfound_next==1 && numtag == 2'h2) begin
+				      src_ip_next[15:0] = in_data[63:48];
+						dst_ip_next[31:0] = in_data[47:16];
+						state_next            = WAIT_EOP;
+				  end
+				  else if(eotfound_next==1 && numtag == 2'h3) begin
+				      src_ip_next[31:0] = in_data[47:16];
+						dst_ip_next[31:16] = in_data[15:0];
+						state_next            = READ_WORD_7;
+				  end
+				  else begin
+				      state_next            = WAIT_EOP;
+				  end
+				  
+           end
+        end
+		  
+		   READ_WORD_7: begin
+           if(in_wr) begin
+              if(eotfound_next==1 && numtag == 2'h3) begin
+				      dst_ip_next[15:0] = in_data[63:48];
+					   state_next            = WAIT_EOP;
+				  end
+				  else begin
+				      state_next            = WAIT_EOP;
+				  end
+				  
+           end
+        end
+
+       READ_WORD_ip1: begin
+           if(in_wr) begin
+			    ttl_out_next = in_data[15:8];
+              if(in_data[7:0] == 8'h11) begin
+                     udpfound  = 1;
+               end
+            state_next            = READ_WORD_ip2;
+            end
+        end
+
+       READ_WORD_ip2: begin
+          if(in_wr) begin
+                src_ip_next[31:0] = in_data[47:16];
+                dst_ip_next[31:16] = in_data[15:0];
+                state_next            =  READ_WORD_ip3;
+          end
+       end
+
+      READ_WORD_ip3: begin
+          if(in_wr) begin
+                dst_ip_next[15:0] = in_data[63:48];
+                udp_src_port_next = in_data[47:32];
+                udp_dst_port_next = in_data[31:16];
+                state_next            =  READ_WORD_ip4;
+          end
+       end
+
+      READ_WORD_ip4: begin
+          if(in_wr) begin
+			     if(udpfound && in_data[31:0] ===  32'h 1234ABCD) begin
+                write_pkt_found1 =1;
+					 pkt_stat_fifo_wr1 =1;
+					
+				  end
+				  else begin
+				    pkt_stat_fifo_wr1 =1;
+				  end
+				  
+                state_next         =  WAIT_EOP;
+          end
+       end
+
+
+
+        WAIT_EOP: begin
+           if(in_wr && in_ctrl!=0) begin
+              eth_done_next   = 0;
+				  udpfound  = 0;
+	           eotfound_next   = 0;
+				  state_next      = READ_WORD_1;
+           end
+        end
+      endcase // case(state)
+   end // always @ (*)
+
+   always @(posedge clk) begin
+      if(reset) begin
+         mplstag1     <= 0;
+		   dst_mac      <= 0;
+         ethertype    <= 0;
+         eth_done     <= 0;
+         state        <= READ_WORD_1;
+         src_port     <= 0;
+			eotfound     <= 0;
+			src_ip       <= 0;
+			dst_ip       <= 0;
+         udp_src_port <= 0;
+         udp_dst_port <= 0;
+         src_mac      <= 0;
+			is_for_us    <= 0;
+			ttl_out      <= 0;
+      end
+      else begin
+         mplstag1     <= mplstag1_next;
+		   dst_mac      <= dst_mac_next;
+         ethertype    <= ethertype_next;
+         eth_done     <= eth_done_next;
+         state        <= state_next;
+         src_port     <= src_port_next;
+	      eotfound     <= eotfound_next;
+	      src_ip       <= src_ip_next;
+	      dst_ip       <= dst_ip_next;
+         udp_src_port <= udp_src_port_next;
+         udp_dst_port <= udp_dst_port_next;
+         src_mac      <= src_mac_next;
+			is_for_us    <= is_for_us_next;
+			ttl_out      <= ttl_out_next;
+
+      end // else: !if(reset)
+   end // always @ (posedge clk)
+	
+	//------------state machine for label lookup--------//
+	 parameter WAIT_FOR_TAGEARLY = 0;
+	 parameter WAIT_FOR_LOAD = 1;
+	 parameter WAIT_READ_ACK1 = 2;
+	 parameter WAIT_READ_ACK2 = 3;
+	 parameter WAIT_READ_ACK3 = 4;
+	 parameter WAIT_READ_VALID = 5;
+	 parameter WAIT_BRAM_READ_VALID = 6;
+   
+	reg[2:0]          req_state, req_state_next;
+	
+   always @(*) begin
+      req_state_next = req_state;
+		mplsword_next = mplsword;
+      rd_0_req = 0;
+		mplsword_read_done = 0;
+		bram_read_req = 0;
+		rd_0_addr = rd_0_addd;
+		bram_dst_mac_next=bram_dst_mac;
+		bram_read_add_next=bram_read_add;
+		parity_error_latch_next=parity_error_latch;	
+		label_read_count_next=  label_read_count; 
+      ld_error_next = ld_error;		
+   	      
+      case(req_state)
+			
+        WAIT_FOR_LOAD: begin
+		       if(mplstag1done) begin
+           		rd_0_req = 1;     
+					rd_0_addr    = mplstag1_next[30:12]*3;
+					mplstag1_add    = mplstag1_next[30:12];
+               req_state_next      = WAIT_READ_ACK1;
+					label_read_count_next = 0;
+										
+				 end
+          			  
+        end
+		  
+		  /// wait for first ack /
+        WAIT_READ_ACK1: begin
+		     if(rd_0_ack)begin
+		        rd_0_req = 1;
+				  rd_0_addr    = rd_0_addr + 19'h1;
+				  req_state_next      = WAIT_READ_ACK2;
+           end
+			  else begin
+			      rd_0_req = 1;
+			  end
+			 
+		  end
+		  
+		// / wait for second ack /
+        WAIT_READ_ACK2: begin
+		     if(rd_0_ack)begin
+		        rd_0_req = 1;
+				  rd_0_addr    = rd_0_addr + 19'h1;
+				  req_state_next      = WAIT_READ_ACK3;
+           end
+			  else begin
+			      rd_0_req = 1;
+			  end
+		  end
+		  
+		  WAIT_READ_ACK3: begin
+		     if(rd_0_ack)begin
+		        rd_0_req = 1;
+				  req_state_next      = WAIT_READ_VALID;
+           end
+			  else begin
+			      rd_0_req = 1;
+			  end
+		  end
+		   
+		WAIT_READ_VALID: begin
+		     if(rd_0_vld)begin
+		        
+				  if(rd_0_data[67:64] !=0)begin
+				    
+					  if(label_read_count == 1)begin
+					     mplsword_read_done = 1;
+					     ld_error_next = 1;
+						  req_state_next   = WAIT_FOR_LOAD;
+					  end
+					  else begin
+					     rd_0_req = 1;
+					     rd_0_addr    = ((rd_0_data[29:11])+(hash4 % rd_0_data[67:64]))*3;
+					     label_read_count_next = label_read_count+1'b1;
+                    req_state_next   = WAIT_READ_ACK1;
+					  end
+				  end
+				  else begin
+				  mplsword_read_done = 1;
+				  mplsword_next = rd_0_data;
+				  parity_error_latch_next=parity_error;
+				  ld_error_next = 0;
+				  bram_read_req = 1;
+			     bram_read_add_next = rd_0_data[57:50];
+			     req_state_next      = WAIT_BRAM_READ_VALID;
+				  end
+           end
+			 
+		  end
+		  
+	  WAIT_BRAM_READ_VALID: begin
+		       if(br_read_valid==1) begin
+			      bram_dst_mac_next = mac_add_out;
+					bram_read_req = 0;
+					req_state_next      = WAIT_FOR_LOAD;
+				 end
+				 else  begin
+			      bram_read_req = 1;
+					
+             end
+		  
+		  end
+		  	  
+		  
+      endcase // case(state)
+   end // always @ (*)
+
+   always @(posedge clk) begin
+      if(reset) begin
+         req_state <= WAIT_FOR_LOAD;
+			mplsword  <= 0;
+			rd_0_addd  <= 0;
+			bram_dst_mac <= 0;
+			bram_read_add <= 0;
+			parity_error_latch <= 0;
+			label_read_count <= 0;
+			ld_error <= 0;
+      end
+      else begin
+         req_state <= req_state_next;
+			mplsword  <= mplsword_next;
+			rd_0_addd  <= rd_0_addr;
+			bram_dst_mac <= bram_dst_mac_next;
+			bram_read_add <= bram_read_add_next;
+			parity_error_latch <= parity_error_latch_next;
+			label_read_count <= label_read_count_next;
+			ld_error <= ld_error_next;
+			
+      end
+   end   
+///----------state machine for generating pkt_status fifo write enable---------------///
+	
+  	 parameter  WAIT_ETH = 0;
+	 parameter  END_ETHDONE= 1;
+	 
+   
+	reg               status_state, status_state_next;
+	reg               pkt_stat_fifo_wr_next;
+	reg               write_pkt_found_next,is_mpls_unicast_next; 
+	
+   always @(*) begin
+      status_state_next = status_state;
+		pkt_stat_fifo_wr_next = pkt_stat_fifo_wr;
+		write_pkt_found_next = write_pkt_found;
+		is_mpls_unicast_next = is_mpls_unicast;
+     
+   	      
+      case(status_state)
+			
+        WAIT_ETH: begin
+		       if(eth_done) begin
+           		if(ethertype==16'h8848) begin
+           		  if(!pkt_stat_fifo_full)begin
+		              pkt_stat_fifo_wr_next =1;
+			           status_state_next = END_ETHDONE;
+		           end
+					end
+					else if(ethertype==16'h0800) begin
+           		   if(pkt_stat_fifo_wr1)begin
+		              write_pkt_found_next = write_pkt_found1;
+				           if(!pkt_stat_fifo_full)begin
+				              pkt_stat_fifo_wr_next =1;
+				              status_state_next = END_ETHDONE;
+				           end
+                  end
+					end
+					else if(ethertype==16'h8847) begin
+           		  is_mpls_unicast_next =1;
+						if(!pkt_stat_fifo_full && mplstag1done)begin
+						  pkt_stat_fifo_wr_next =1;
+				   	  status_state_next = END_ETHDONE;
+						end
+					end
+					else  begin
+					  if(!pkt_stat_fifo_full)begin
+						  pkt_stat_fifo_wr_next =1;
+				   	  status_state_next = END_ETHDONE;
+						end
+					end
+				 end
+          			  
+        end
+		  
+	  			  
+	  END_ETHDONE: begin
+		       if(!eth_done) begin
+				    status_state_next = WAIT_ETH;
+				 end
+				 else begin
+				  pkt_stat_fifo_wr_next =0;
+				  write_pkt_found_next = 0;
+		  	     is_mpls_unicast_next = 0;
+				 end
+				 		  
+		  end
+		  	  
+		  
+      endcase // case(state)
+   end // always @ (*)
+
+   always @(posedge clk) begin
+      if(reset) begin
+         status_state <= WAIT_ETH;
+			pkt_stat_fifo_wr  <= 0;
+			write_pkt_found <= 0;
+			is_mpls_unicast <= 0;
+			
+      end
+      else begin
+         status_state <= status_state_next;
+			pkt_stat_fifo_wr  <= pkt_stat_fifo_wr_next;
+			write_pkt_found <= write_pkt_found_next;
+			is_mpls_unicast <= is_mpls_unicast_next;
+			
+			
+      end
+   end   
+	
+///--------end of state machine-------------------------------///	
+
+assign counter_write_add = rd_0_addr;
+
+endmodule // ethernet_parser_64bit

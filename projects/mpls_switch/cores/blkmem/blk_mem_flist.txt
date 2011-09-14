@@ -1,0 +1,8 @@
+# Output products list for <blk_mem>
+blk_mem.ngc
+blk_mem.v
+blk_mem.veo
+blk_mem.xco
+blk_mem_blk_mem_gen_v2_7_xst_1.ngc_xst.xrpt
+blk_mem_flist.txt
+blk_mem_xmdf.tcl

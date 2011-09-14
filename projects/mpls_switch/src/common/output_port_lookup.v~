@@ -1,0 +1,779 @@
+///////////////////////////////////////////////////////////////////////////////
+// vim:set shiftwidth=3 softtabstop=3 expandtab:
+// $Id: output_port_lookup.v 5240 2009-03-14 01:50:42Z grg $
+//
+// Module: switch_output_port.v
+// Project: NF2.1
+// Description: reads incoming packets parses them and decides on the output port
+//  and adds it as a header. The design of this module assumes that only one eop
+//  will be in the pipeline of this module at any given time.
+//  i.e. we assume pkt length incl pkt and module headers >= 8*DATA_WIDTH bits
+//  for a 64 bit datapath, this is 64 bytes.
+//
+///////////////////////////////////////////////////////////////////////////////
+`timescale 1ns/1ps
+  module output_port_lookup
+    #(parameter DATA_WIDTH = 64,
+      parameter CTRL_WIDTH=DATA_WIDTH/8,
+      parameter UDP_REG_SRC_WIDTH = 2,
+      parameter INPUT_ARBITER_STAGE_NUM = 2,
+      parameter NUM_OUTPUT_QUEUES = 8,
+      parameter STAGE_NUM = 4,
+      parameter NUM_IQ_BITS = 3)
+
+   (// --- data path interface
+    output reg [DATA_WIDTH-1:0]        out_data,
+    output reg [CTRL_WIDTH-1:0]        out_ctrl,
+    output reg                         out_wr,
+    input                              out_rdy,
+
+    input  [DATA_WIDTH-1:0]            in_data,
+    input  [CTRL_WIDTH-1:0]            in_ctrl,
+    input                              in_wr,
+    output                             in_rdy,
+	 
+	 
+// --- Sram interface
+    output reg [18:0]                  sram_write_add_dout, 
+	 output reg [71:0]                  lookup_write_data_dout,
+    output reg                         wr_0_req,
+	 input                              wr_0_ack,
+  	 output                             rd_0_req,
+	 input                              rd_0_ack,
+	 output [18:0]                      rd_0_addr,
+	 input                              rd_0_vld,
+	 input [71:0]                       rd_0_data,
+	 
+	 output[47:0]                       bram_dst_mac,
+	 output[71:0]                       mplsword,
+	 output                             unicast_out,
+	 output                             write_pkt_out,
+	 output [7:0]                       ttl_stat_out,
+	
+    // --- Register interface
+    input                              reg_req_in,
+    input                              reg_ack_in,
+    input                              reg_rd_wr_L_in,
+    input  [`UDP_REG_ADDR_WIDTH-1:0]   reg_addr_in,
+    input  [`CPCI_NF2_DATA_WIDTH-1:0]  reg_data_in,
+    input  [UDP_REG_SRC_WIDTH-1:0]     reg_src_in,
+
+    output                             reg_req_out,
+    output                             reg_ack_out,
+    output                             reg_rd_wr_L_out,
+    output  [`UDP_REG_ADDR_WIDTH-1:0]  reg_addr_out,
+    output  [`CPCI_NF2_DATA_WIDTH-1:0] reg_data_out,
+    output  [UDP_REG_SRC_WIDTH-1:0]    reg_src_out,
+	 
+    // --- Misc
+    input                              clk,
+    input                              reset);
+	 
+    
+    wire [47:0]     dst_mac;
+    wire [15:0]     ethertype,ethertype_out;
+    wire            eth_done; 
+    wire [NUM_IQ_BITS-1:0] src_port;
+    wire [47:0]     src_mac;
+    wire [15:0]     udp_src_port;
+    wire [15:0]     udp_dst_port;
+    wire            write_pkt_found;
+    reg [18:0]     sram_add_in,sram_write_add_dout_next,sram_add_in_next;
+	 reg [71:0]     lookup_data_write,lookup_data_write_next,lookup_write_data_dout_next;
+	 reg            lookup_wr;
+	 wire            lookup_fifo_nearly_full,bram_fifo_nearly_full;
+	 reg             in_fifo_rd_en,count_latch_done;
+	 wire [63:0]    in_fifo_data_dout;
+	 wire           lookup_write_fifo_empty,bram_write_fifo_empty;
+	 reg            lookup_fifo_rd_en,wr_0_req_next;
+	 wire [18:0]    sram_add_dout, counter_write_add;
+	 wire [71:0]    lookup_data_dout;
+	 wire           mplsword_read_done,bram_fifo_rd_en;
+	 reg [71:0]     counter_1,counter_2,counter_1_next,counter_2_next;
+	 reg [18:0]     counter_latch_add,counter_latch_add_next;
+	 wire [7:0]     bram_add_dout;
+ 	 wire [47:0]    bram_data_dout;
+	 reg [7:0]      bram_add_in,bram_add_in_next;
+	 reg [47:0]     bram_data_write,bram_data_write_next;
+	 reg            bram_wr,stat_fifo_rd_en;
+	 wire           br_read_valid,pkt_stat_fifo_full;
+	 wire[47:0]     mac_add_out;
+	 wire [7:0]     bram_read_add;
+	 wire           bram_read_req,is_for_us;
+	 wire  [47:0]                      mac_0;    // address of rx queue 0
+    wire  [47:0]                      mac_1;    // address of rx queue 1
+    wire  [47:0]                      mac_2;    // address of rx queue 2
+    wire  [47:0]                      mac_3;    // address of rx queue 3
+	 wire                              pkt_stat_fifo_wr,is_mpls_unicast,stat_fifo_empty;
+	 wire                              is_for_us_out;
+	 
+   wire [7:0]                   in_fifo_ctrl_dout;
+   wire                         in_fifo_nearly_full;
+   wire                         in_fifo_empty;
+	reg[7:0]                     write_word_count,write_word_count_next;
+	wire [7:0]                   ttl_out;
+	reg [NUM_IQ_BITS-1:0]        src_port_latch,src_port_latch_next;
+	wire [18:0]                  mplstag1_add;
+   wire                         pkt_byte_empty;
+	reg                          pkt_byte_rd_en;
+	wire[15:0]                   pkt_byte_len;
+		 
+	 	  
+   //------------------------- Modules-------------------------------
+   ethernet_parser
+     #(.DATA_WIDTH (DATA_WIDTH),
+       .CTRL_WIDTH (CTRL_WIDTH),
+       .NUM_IQ_BITS(NUM_IQ_BITS),
+       .INPUT_ARBITER_STAGE_NUM(INPUT_ARBITER_STAGE_NUM))
+     ethernet_parser
+         (.in_data(in_data),
+          .in_ctrl(in_ctrl),
+          .in_wr(in_wr),
+          .dst_mac (dst_mac),
+          .src_mac (src_mac),
+          .ethertype (ethertype),
+          .eth_done (eth_done),
+          .src_port(src_port),
+          .rd_0_addr(rd_0_addr),
+			 .rd_0_data(rd_0_data),
+			 .rd_0_req(rd_0_req),
+          .rd_0_ack(rd_0_ack),
+			 .rd_0_vld(rd_0_vld),
+          .udp_src_port (udp_src_port),
+          .udp_dst_port (udp_dst_port),
+          .write_pkt_found (write_pkt_found),
+          .bram_dst_mac(bram_dst_mac),
+          .mplsword_read_done (mplsword_read_done),
+			 .mplsword(mplsword),
+          .counter_write_add (counter_write_add),
+          .mac_add_out(mac_add_out),
+          .bram_read_req(bram_read_req),
+          .bram_read_add_next(bram_read_add),
+          .br_read_valid(br_read_valid),
+          .mac_0(mac_0),
+          .mac_1(mac_1),
+          .mac_2(mac_2),
+   	    .mac_3(mac_3),
+          .is_for_us(is_for_us),
+          .pkt_stat_fifo_full(pkt_stat_fifo_full),
+          .pkt_stat_fifo_wr(pkt_stat_fifo_wr),
+          .is_mpls_unicast(is_mpls_unicast),	
+          .parity_error_latch(parity_error_latch),	
+          .ttl_out (ttl_out),
+          .	mplstag1_add (mplstag1_add),	
+		    .pkt_byte_empty (pkt_byte_empty),
+	       .pkt_byte_rd_en (pkt_byte_rd_en),
+	       .pkt_byte_len (pkt_byte_len),
+          .ld_error (ld_error),		 
+          .reset(reset),
+          .clk(clk));
+
+  
+  
+
+   /* The size of this fifo has to be large enough to fit the previous modules' headers
+    * and the ethernet header */
+   small_fifo #(.WIDTH(DATA_WIDTH+CTRL_WIDTH), .MAX_DEPTH_BITS(5))
+      input_fifo
+        (.din ({in_ctrl,in_data}),     // Data in
+         .wr_en (in_wr),               // Write enable
+         .rd_en (in_fifo_rd_en),       // Read the next word
+         .dout ({in_fifo_ctrl_dout, in_fifo_data_dout}),
+         .full (),
+         .prog_full (),
+         .nearly_full (in_fifo_nearly_full),
+         .empty (in_fifo_empty),
+         .reset (reset),
+         .clk (clk)
+         );
+
+  small_fifo #(.WIDTH(27), .MAX_DEPTH_BITS(5))
+    pkt_stat_fifo
+     (.dout({is_for_us_out,unicast_out,write_pkt_out,ttl_stat_out,ethertype_out}),
+      .full(),
+     // .prog_full (),
+      .nearly_full(pkt_stat_fifo_full),
+      .empty(stat_fifo_empty),
+      .din({is_for_us,is_mpls_unicast,write_pkt_found,ttl_out,ethertype}),
+      .wr_en(pkt_stat_fifo_wr),
+      .rd_en (stat_fifo_rd_en),
+      .reset(reset),
+      .clk(clk));
+
+fallthrough_small_fifo
+     #(.WIDTH(91),
+       .MAX_DEPTH_BITS(5))
+   lookup_write_fifo
+     (.dout({sram_add_dout, lookup_data_dout}),
+      .full(),
+     // .prog_full (),
+      .nearly_full(lookup_fifo_nearly_full),
+      .empty(lookup_write_fifo_empty),
+      .din({sram_add_in,lookup_data_write_next}),
+      .wr_en(lookup_wr),
+      .rd_en (lookup_fifo_rd_en),
+      .reset(reset),
+      .clk(clk));
+		
+fallthrough_small_fifo
+     #(.WIDTH(56),
+       .MAX_DEPTH_BITS(5))
+   bram_write_fifo
+     (.dout({bram_add_dout, bram_data_dout}),
+      .full(),
+     // .prog_full (),
+      .nearly_full(bram_fifo_nearly_full),
+      .empty(bram_write_fifo_empty),
+      .din({bram_add_in_next,bram_data_write_next}),
+      .wr_en(bram_wr),
+      .rd_en (bram_fifo_rd_en),
+      .reset(reset),
+		.clk(clk));		
+		
+		
+ bram_lookup     bram_lookup
+         (.wr_add_in(bram_add_dout),
+			 .wr_data_in(bram_data_dout),
+			 .rd_add_in(bram_read_add),
+			 .wr_fifo_bram_empty(bram_write_fifo_empty),
+			 .bram_read_req(bram_read_req),
+			 .wr_fifo_bram_rd_en(bram_fifo_rd_en),
+			 .mac_add_out(mac_add_out),
+			 .br_read_valid(br_read_valid),
+          	 
+          .reset(reset),
+          .clk(clk));
+			 
+wire           drop_not_for_us;
+wire           drop_parity_error;
+wire           drop_ttl_error;
+wire           drop_ld_error;
+
+wire[47:0]           mac_0;
+wire [47:0]          mac_1;
+wire[47:0]           mac_2;
+wire [47:0]          mac_3;
+	
+wire[18:0]           ls1_base;
+wire[18:0]           ls1_bound;
+wire[18:0]           ls2_base;
+wire[18:0]           ls2_bound;
+wire[18:0]           ls3_base;
+wire[18:0]           ls3_bound;
+wire[18:0]           ls4_base;
+wire [18:0]          ls4_bound;
+wire [18:0]          ld_base;
+wire[18:0]           ld_bound;
+wire label_space_error;
+
+assign drop_not_for_us  = ((state==PARSE_STATUS) && !is_for_us_out);
+assign drop_parity_error  = ((state==WAIT_EOP) && unicast_out && parity_error_latch);
+assign drop_ttl_error  = ((state==PARSE_STATUS) && (ttl_stat_out<=1));	
+assign label_space_error  = ((state==PARSE_STATUS) && (mplstag1_add>add_max || mplstag1_add<add_base));
+assign drop_ld_error  = ((state==WAIT_EOP) && unicast_out && ld_error);
+
+	
+reg[18:0]           add_max;
+reg[18:0]           add_base;
+
+  always @(*)
+  begin
+              if (src_port==3'b000)begin 
+				      add_max = ls1_base+ls1_bound-1;
+						add_base = ls1_base;
+				  end
+              else if (src_port==3'b010)begin
+     				   add_max = ls2_base+ls2_bound-1;
+						add_base = ls2_base;
+              end					
+              else if (src_port==3'b100)begin 
+			         add_max = ls3_base+ls3_bound-1;
+						add_base = ls3_base;
+              end						
+              else if (src_port==3'b110)begin 
+			         add_max = ls4_base+ls4_bound-1;
+						add_base = ls4_base;
+			     end		
+              else begin  
+			         add_max = 19'h0;
+						add_base = 19'h0;
+              end 						
+  end
+	
+	op_lut_regs
+     #( .NUM_OUTPUT_QUEUES(NUM_OUTPUT_QUEUES),
+        .UDP_REG_SRC_WIDTH(UDP_REG_SRC_WIDTH))
+     op_lut_regs
+     (
+      // Registers
+      .reg_req_in       (reg_req_in),
+      .reg_ack_in       (reg_ack_in),
+      .reg_rd_wr_L_in   (reg_rd_wr_L_in),
+      .reg_addr_in      (reg_addr_in),
+      .reg_data_in      (reg_data_in),
+      .reg_src_in       (reg_src_in),
+
+      .reg_req_out      (reg_req_out),
+      .reg_ack_out      (reg_ack_out),
+      .reg_rd_wr_L_out  (reg_rd_wr_L_out),
+      .reg_addr_out     (reg_addr_out),
+      .reg_data_out     (reg_data_out),
+      .reg_src_out      (reg_src_out),
+
+           
+      // Inputs
+      .drop_not_for_us                              (drop_not_for_us),
+		.drop_parity_error                            (drop_parity_error),
+		.drop_ttl_error                               (drop_ttl_error),
+		.label_space_error                            (label_space_error),
+		.drop_ld_error                                (drop_ld_error),
+		
+		//outputs
+		.mac_0          (mac_0),
+      .mac_1          (mac_1),
+      .mac_2          (mac_2),
+   	.mac_3          (mac_3),	
+      .ls1_base       (ls1_base),
+      .ls1_bound      (ls1_bound),
+      .ls2_base       (ls2_base),
+      .ls2_bound      (ls2_bound),
+      .ls3_base       (ls3_base),
+      .ls3_bound      (ls3_bound),
+      .ls4_base       (ls4_base),
+      .ls4_bound      (ls4_bound),
+      .ld_base        (ld_base),
+      .ld_bound       (ld_bound),		
+      
+      .clk            (clk),
+      .reset          (reset));
+
+	
+//------------State machine for reading input_fif0---------------//
+   parameter NUM_STATES = 4;
+	parameter WAIT_STAT_DONE              = 1;
+	parameter PARSE_STATUS                = 2;
+	parameter WRITE_PKT_DECODE            = 3;
+	parameter LOOKUP_START_WRITE1         = 4;
+	parameter LOOKUP_START_WRITE2         = 5;
+	parameter LOOKUP_START_WRITE_BRFIFO1  = 6;
+	parameter DROP_PKT                    = 7;
+   parameter WAIT_EOP                    = 8;
+	
+   
+	reg [NUM_STATES-1:0]         state, state_next;
+	
+   always @(*) begin
+      state_next = state;
+      lookup_wr = 0;
+		bram_wr = 0;
+		in_fifo_rd_en = 0;
+		stat_fifo_rd_en =0;
+		sram_add_in_next = sram_add_in;
+		lookup_data_write_next = lookup_data_write;
+		bram_add_in_next = bram_add_in;
+		bram_data_write_next = bram_data_write;
+		out_ctrl = in_fifo_ctrl_dout;
+      out_data = in_fifo_data_dout;
+      out_wr = 0;
+		write_word_count_next = write_word_count;
+    
+			      
+      case(state)
+		
+		 WAIT_STAT_DONE: begin
+                               
+			  if(!stat_fifo_empty && !in_fifo_empty) begin
+			       stat_fifo_rd_en =1;
+			       in_fifo_rd_en = 1;
+                state_next      = PARSE_STATUS;
+           end
+        end
+		  
+		  PARSE_STATUS: begin
+                if(ethertype_out 16'h8848)begin
+					    state_next      = WAIT_EOP;
+                end					 
+			  
+					 else if(is_for_us_out) begin
+                    if(write_pkt_out) begin
+                        state_next      = WRITE_PKT_DECODE;
+					     end
+						  else if(unicast_out) begin
+						      
+								if(mplstag1_add>add_max || mplstag1_add<add_base) begin
+                           state_next      = DROP_PKT;
+					         end
+								else if(mplsword_read_done) begin
+                           state_next      = WAIT_EOP;
+					         end
+					     end
+						  else begin
+						      state_next      = WAIT_EOP;
+						  end
+					 end
+					 else begin
+					     state_next      = DROP_PKT;
+					 end
+          
+        end
+		  
+        WRITE_PKT_DECODE: begin
+                               
+			   if(out_rdy && !in_fifo_empty) begin
+			       in_fifo_rd_en = 1;
+                out_wr        = 1;
+                if((in_fifo_data_dout[31:0] == 48'h 1234ABCD) && (in_fifo_data_dout[47:40] == 8'h 11)) begin
+                   state_next      = LOOKUP_START_WRITE1;
+						 write_word_count_next = in_fifo_data_dout[39:32];
+			       end
+				    else if((in_fifo_data_dout[31:0] == 48'h 1234ABCD) && (in_fifo_data_dout[47:40] == 8'h 22)) begin
+                   state_next      = LOOKUP_START_WRITE_BRFIFO1;
+						 write_word_count_next = in_fifo_data_dout[39:32];
+			       end 					 
+           end
+        end
+		  
+		 
+		  /// write to look-up write fifo /
+        LOOKUP_START_WRITE1: begin
+		      
+				    if(in_fifo_ctrl_dout != 0) begin
+					      if(out_rdy)begin
+                       state_next      = WAIT_STAT_DONE;
+							  out_wr = 1;
+							end
+			        end
+					  
+					  else if(write_word_count<= 0)begin
+					    if(!in_fifo_empty && out_rdy)begin
+					       state_next      = WAIT_EOP;
+						    out_wr = 1;
+						    in_fifo_rd_en = 1;
+						 end
+					  end
+					  
+					  else begin
+					    sram_add_in_next = in_fifo_data_dout[26:8];
+			          lookup_data_write_next[71:64] = in_fifo_data_dout[7:0];
+						 if(!in_fifo_empty && out_rdy)begin
+						    out_wr = 1;
+						    in_fifo_rd_en = 1;
+						    state_next      = LOOKUP_START_WRITE2;
+						 end
+			        end
+			   end
+		  
+		  
+		 /// write to look-up write fifo /
+        LOOKUP_START_WRITE2: begin
+		      
+						if(in_fifo_ctrl_dout != 0) begin
+						  
+							lookup_data_write_next[63:0] = in_fifo_data_dout[63:0];
+							if(out_rdy && !lookup_fifo_nearly_full)begin
+							   lookup_wr =1;
+							   out_wr        = 1;
+                        state_next      = WAIT_STAT_DONE;
+							end
+			         end
+						else begin
+						    lookup_data_write_next[63:0] = in_fifo_data_dout[63:0];
+						    if(out_rdy && !in_fifo_empty && !lookup_fifo_nearly_full)begin
+						       in_fifo_rd_en = 1;
+					          out_wr        = 1;
+			             	 lookup_wr =1;
+						       write_word_count_next = write_word_count - 1;
+                         state_next      = LOOKUP_START_WRITE1;
+							 end
+			         end
+			   end 
+
+        LOOKUP_START_WRITE_BRFIFO1: begin
+		      
+				   if(in_fifo_ctrl_dout != 0 && write_word_count > 0) begin
+					      bram_add_in_next = in_fifo_data_dout[55:48];
+							bram_data_write_next = in_fifo_data_dout[47:0];
+							if(out_rdy && !bram_fifo_nearly_full)begin
+					         bram_wr =1;
+					         out_wr        = 1;
+                        state_next      = WAIT_STAT_DONE;
+							end
+					  
+			      end
+					else if(write_word_count<= 0)begin
+					      if(out_rdy && !in_fifo_empty && in_fifo_ctrl_dout == 0)begin
+						         out_wr = 1;
+						         in_fifo_rd_en = 1;
+								 	state_next      = WAIT_EOP;
+							end
+							else if(out_rdy && in_fifo_ctrl_dout != 0)begin
+							       out_wr        = 1;
+                            state_next      = WAIT_STAT_DONE;
+							end
+						 
+						 end
+						
+				  else begin
+					    bram_add_in_next = in_fifo_data_dout[55:48];
+					    bram_data_write_next = in_fifo_data_dout[47:0];
+						 if(out_rdy && !in_fifo_empty && !bram_fifo_nearly_full)begin   
+					        in_fifo_rd_en = 1;
+						     out_wr = 1;
+					        write_word_count_next = write_word_count - 1;
+					        bram_wr =1;
+						 end
+					
+					end
+				
+        end
+	    
+		    
+        DROP_PKT: begin
+           if(in_fifo_ctrl_dout!=0 && in_fifo_ctrl_dout!= 8'hff)begin
+                 state_next   = WAIT_STAT_DONE;
+           end
+           else if(!in_fifo_empty) begin
+              in_fifo_rd_en   = 1;
+           end
+        end
+
+     
+        WAIT_EOP: begin
+		     if((unicast_out && parity_error_latch) || (unicast_out && ld_error))begin
+			    state_next   = DROP_PKT;
+			  end
+			  
+           else if(in_fifo_ctrl_dout!=0 && in_fifo_ctrl_dout!= 8'hff)begin
+              if(out_rdy) begin
+                 state_next   = WAIT_STAT_DONE;
+                 out_wr       = 1;
+              end
+           end
+           else if(!in_fifo_empty & out_rdy) begin
+              in_fifo_rd_en   = 1;
+              out_wr          = 1;
+           end
+        end // case: WAIT_EOP
+
+      endcase // case(state)
+   end // always @ (*)
+
+   always @(posedge clk) begin
+      if(reset) begin
+         state <= WAIT_STAT_DONE;
+			sram_add_in <= 0;
+			lookup_data_write <= 0;
+			bram_add_in <= 0;
+			bram_data_write <= 0;
+			write_word_count <= 0;
+			
+      end
+      else begin
+         state <= state_next;
+			sram_add_in <= sram_add_in_next;
+			lookup_data_write <= lookup_data_write_next;
+			bram_add_in <= bram_add_in_next;
+			bram_data_write <= bram_data_write_next;
+			write_word_count <= write_word_count_next;
+	
+      end
+   end
+
+   //----state machine to generate write request to sram ----------------//
+
+   parameter WAIT_FOR_LOAD = 0;
+	parameter WAIT_WRITE_ACK = 1;
+	parameter WAIT_COUNT_ACK_1 = 2;
+	parameter WAIT_COUNT_ACK_2 = 3;
+	
+   
+	reg[1:0]          req_state, req_state_next;
+	
+   always @(*) begin
+      req_state_next = req_state;
+      wr_0_req_next = wr_0_req;
+		lookup_fifo_rd_en =0;
+		sram_write_add_dout_next = sram_write_add_dout;
+      lookup_write_data_dout_next = lookup_write_data_dout;		
+	      
+      case(req_state)
+        WAIT_FOR_LOAD: begin
+		     if(count_latch_done) begin
+			      wr_0_req_next = 1;
+					sram_write_add_dout_next = counter_latch_add-1;
+               lookup_write_data_dout_next = counter_1;
+			     req_state_next      = WAIT_COUNT_ACK_1;
+			  end
+           else if(!lookup_write_fifo_empty) begin
+			      wr_0_req_next = 1;
+					sram_write_add_dout_next = sram_add_dout*3;
+               lookup_write_data_dout_next = lookup_data_dout;
+					lookup_fifo_rd_en =1;
+               req_state_next      = WAIT_WRITE_ACK;
+           end
+			  
+        end
+		  
+		 ///// write to look-up write fifo /
+        WAIT_WRITE_ACK: begin
+		     if(wr_0_ack & !lookup_write_fifo_empty)begin
+		         wr_0_req_next = 1;
+					sram_write_add_dout_next = sram_add_dout*3;
+               lookup_write_data_dout_next = lookup_data_dout;
+					lookup_fifo_rd_en =1;
+				  
+           end
+			  else if(wr_0_ack & lookup_write_fifo_empty)begin
+			      wr_0_req_next = 0;
+					req_state_next      = WAIT_FOR_LOAD;
+			  end
+		  end
+		  
+		  WAIT_COUNT_ACK_1: begin
+		       if(wr_0_ack)begin
+		         wr_0_req_next = 1;
+					sram_write_add_dout_next = counter_latch_add;
+               lookup_write_data_dout_next = counter_2;
+					req_state_next      = WAIT_COUNT_ACK_2;
+									  
+             end
+		  
+		  end
+		  
+		  WAIT_COUNT_ACK_2: begin
+		       if(wr_0_ack)begin
+		         wr_0_req_next = 0;
+					req_state_next      = WAIT_FOR_LOAD;
+									  
+             end
+		  
+		  end
+		  
+		  
+      endcase // case(state)
+   end // always @ (*)
+
+   always @(posedge clk) begin
+      if(reset) begin
+         req_state <= WAIT_FOR_LOAD;
+			wr_0_req <= 0;
+			sram_write_add_dout <= 0;
+         lookup_write_data_dout <= 0;
+      end
+      else begin
+         sram_write_add_dout <= sram_write_add_dout_next;
+         lookup_write_data_dout <= lookup_write_data_dout_next;
+			wr_0_req <= wr_0_req_next;
+			req_state <= req_state_next;
+      end
+   end 
+
+//-----------state machine for latching sram counter data and add ------------//
+  
+	
+ wire[7:0]  count_parity1;
+ wire[7:0]  count_parity2;
+ wire[63:0] counter_data;
+ wire[63:0] counter_data1;
+ wire[63:0] counter_data2;
+ 
+ assign counter_data = rd_0_data[71:8];
+ assign counter_data1 = counter_data+1;
+ assign counter_data2 = counter_data+pkt_byte_len;
+ 
+   generate
+      genvar 	i;
+      for (i=7; i>=0; i=i-1) begin: test
+	      assign count_parity1[i] = ^counter_data1[(((i)*8)+7):((i)*8)];
+      end
+   endgenerate
+	
+	generate
+      genvar 	k;
+      for (k=7; k>=0; k=k-1) begin: test1
+	      assign count_parity2[k] = ^counter_data2[(((k)*8)+7):((k)*8)];
+      end
+   endgenerate
+	
+   parameter WAIT_FOR_WORD_DONE = 1;
+	parameter WAIT_ADD1 = 2;
+	parameter WAIT_ADD2 = 3;
+		
+   
+	reg[1:0]          add_state, add_state_next;
+	
+   always @(*) begin
+      add_state_next = add_state;
+      counter_latch_add_next = counter_latch_add;
+		count_latch_done =0;
+		counter_1_next = counter_1;
+		counter_2_next = counter_2;
+		pkt_byte_rd_en = 0;
+			      
+      case(add_state)
+        WAIT_FOR_WORD_DONE: begin
+		     
+          if(mplsword_read_done) begin
+			      counter_latch_add_next = counter_write_add;
+               add_state_next    = WAIT_ADD1;
+           end
+			  
+        end
+		  
+		 ///// write to look-up write fifo /
+        WAIT_ADD1: begin
+		     if(rd_0_vld)begin
+			     counter_1_next       = {counter_data1,count_parity1};
+              add_state_next      = WAIT_ADD2;
+			  end
+		  end
+		  
+		 WAIT_ADD2: begin
+		     
+        if(rd_0_vld)begin
+			     counter_2_next       = {counter_data2,count_parity2};
+				  count_latch_done =1;
+              add_state_next      = WAIT_FOR_WORD_DONE;
+				  if(!pkt_byte_empty) begin
+				     pkt_byte_rd_en = 1;
+				  end  
+			  end
+			 
+			  
+        end
+		  
+		  
+		  
+      endcase // case(state)
+   end // always @ (*)
+
+   always @(posedge clk) begin
+      if(reset) begin
+         add_state <= WAIT_FOR_WORD_DONE;
+			counter_latch_add <= 0;
+			counter_1 <= 0;
+			counter_2 <= 0;
+      end
+      else begin
+		   add_state <= add_state_next;
+        	counter_latch_add <= counter_latch_add_next;
+         counter_1 <= counter_1_next;
+			counter_2 <= counter_2_next;
+      end
+   end
+
+
+
+/*//----------------------------------test-----------------------------//
+ assign  mac_3 = 48'h123456789abc;
+ assign  mac_2 = 48'h2;
+ assign  mac_1 = 48'h1;
+ assign  mac_0 = 48'h3;
+//---------------------end test---------------------------//*/
+
+
+
+  assign    in_rdy = !in_fifo_nearly_full;
+
+  
+endmodule // switch_output_port

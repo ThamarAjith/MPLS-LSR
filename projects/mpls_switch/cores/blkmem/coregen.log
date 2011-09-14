@@ -1,0 +1,11 @@
+Welcome to Xilinx CORE Generator.
+Wrote project file /home/ajith/Desktop/blkmem/coregen.cgp.
+Customizing IP...
+Finished Customizing.
+Generating IP...
+Generating Implementation files.
+Generating NGC file.
+Generating Verilog structural model.
+Finished Generating.
+Successfully generated blk_mem.
+Closed project file.

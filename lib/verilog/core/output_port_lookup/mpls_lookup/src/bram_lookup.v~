@@ -1,0 +1,129 @@
+/////////////////////////////////////////////////////////////////////////////
+// vim:set shiftwidth=3 softtabstop=3 expandtab:
+// user_data_path.v 1973 2007-07-20 00:57:30Z grg 
+//// Module: user_data_path.v
+// Project: NF2.1
+// Description: contains all the user instantiated modules
+//
+///////////////////////////////////////////////////////////////////////////////
+`timescale 1ns/1ns
+
+module bram_lookup
+     (
+    input  [7:0]                       wr_add_in,
+    input  [47:0]                      wr_data_in,
+    input  [7:0]                       rd_add_0,
+    input  [7:0]                       rd_add_1,
+    input                              wr_req,
+    input                              read_req_0,
+    input                              read_req_1,
+    output reg                         wr_ack,
+    output reg                         rd_ack_0,
+    output reg                         rd_ack_1,
+    output [47:0]                      mac_add_out,
+
+     // misc
+     input                              reset,
+     input                              clk);
+
+
+  reg         wea;
+  reg [7:0]  br_add_in;
+  reg  [47:0] br_wr_data_in;
+  
+  
+   blk_mem     blk_mem
+         (.clka(clk),
+	  .wea(wea),
+	  .addra(br_add_in),
+	  .douta(mac_add_out),
+	  .dina(br_wr_data_in));
+			 
+ //----state machine to allocate  write and read ----------------//
+
+        parameter WAIT_FOR_LOAD = 0;
+	parameter WAIT_WRITE_ACK = 1;
+	parameter WAIT_COUNT_ACK_1 = 2;
+	parameter WAIT_COUNT_ACK_2 = 3;
+        parameter WAIT_COUNT_ACK_3 = 4;
+        parameter WAIT_REQ0_ACK = 5;
+        parameter WAIT_REQ1_ACK = 6;
+	
+   
+	reg[2:0]          req_state, req_state_next;
+		
+   always @(*) begin
+      req_state_next = req_state;
+      wea = 0;
+      wr_ack=0;
+       
+      case(req_state)
+        WAIT_FOR_LOAD: begin
+		    
+          if(wr_req || read_req_0 || read_req_1) begin
+	       if(wr_req) begin
+                  wea=1;
+                  br_add_in=wr_add_in;
+                  br_wr_data_in=wr_data_in;
+                  req_state_next      = WAIT_WRITE_ACK;
+               end
+               else if(read_req_0) begin
+                  br_add_in=rd_add_0;
+                  req_state_next      = WAIT_COUNT_ACK_2;
+               end
+               else if(read_req_1) begin
+                  br_add_in=rd_add_1;
+                  req_state_next      = WAIT_COUNT_ACK_3;
+               end
+          end
+	 	  
+     end
+		  
+		 ///// write to look-up write fifo /
+        WAIT_WRITE_ACK: begin
+		wr_ack=1; 
+                req_state_next      = WAIT_COUNT_ACK_1;   
+        end
+		  
+        WAIT_COUNT_ACK_1: begin
+	      if(!wr_req)
+              req_state_next      = WAIT_FOR_LOAD;
+        end
+
+		  
+       WAIT_COUNT_ACK_2: begin
+	       rd_ack_0=1;
+               req_state_next      = WAIT_REQ0_ACK;
+       end
+
+      WAIT_REQ0_ACK: begin
+	       if(!read_req_0) 
+                    req_state_next      = WAIT_FOR_LOAD;
+      end
+	
+      WAIT_COUNT_ACK_3: begin
+	       rd_ack_1=1;
+               req_state_next      = WAIT_REQ1_ACK;
+       end
+
+      WAIT_REQ1_ACK: begin
+	       if(!read_req_1) 
+                    req_state_next      = WAIT_FOR_LOAD;
+      end	  
+		  
+      endcase // case(state)
+   end // always @ (*)
+
+   always @(posedge clk) begin
+      if(reset) begin
+         req_state <= WAIT_FOR_LOAD;
+      end
+      else begin
+         req_state <= req_state_next;
+      end
+   end 
+	
+
+ 
+			 
+endmodule // user_data_path

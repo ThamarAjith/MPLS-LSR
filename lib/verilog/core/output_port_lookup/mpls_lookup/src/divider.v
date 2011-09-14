@@ -1,0 +1,217 @@
+//
+// MPLS Switch Divider Module Enhancements,
+//   Developed by Algo-Logic Systems
+//   for Google, Copyright 2011, all rights reserved
+//   Distributed through the Apache 2.0 License
+// Based on code from NetFPGA Project
+//   Distributed through the NetBSD License
+//-----------------------------------------------------------
+// Module: divider.v
+// Project: NF2.1
+// Description: Divider unit used for load distribution.
+//
+///////////////////////////////////////////////////////////////////////////////
+`timescale 1ns/1ps
+
+  module divider
+    
+   (// --- Interface to the previous stage
+         input [3:0]dividend,
+	 input [3:0] divisor,
+	 output reg [3:0]    remainder,
+	// --- Misc
+
+    input                              reset,
+    input                              clk
+   );
+
+
+ wire [1:0] dh1;
+ wire[3:0] mod_8;
+
+ assign dh1 = dividend[3:2]^dividend[1:0];
+ assign mod_8 = dividend%8;
+
+ always @(posedge clk) begin
+      if(reset) begin
+         remainder=0;
+      end
+      else begin
+            if(divisor==4'h1) begin
+                remainder=0;
+            end
+            if(divisor==4'h2) begin
+                remainder=dividend%2;
+            end
+            if(divisor==4'h3) begin
+                   if (dh1==2'b11)begin
+                      remainder=0;
+                   end
+                   else begin
+                      remainder={2'b0,dh1};
+                   end
+            end
+            if(divisor==4'h4) begin
+                remainder=dividend%4;
+            end 
+            if(divisor==4'h5) begin
+                   if (mod_8==4'h7)begin
+                      remainder=0;
+                   end
+                   else if (mod_8==4'h6)begin
+                      remainder=4'h2;
+                   end
+                   else if (mod_8==4'h5)begin
+                      remainder=4'h4;
+                   end
+                   else begin
+                      remainder=mod_8;
+                   end
+            end 
+            if(divisor==4'h6) begin
+                   if (mod_8==4'h7)begin
+                      remainder=0;
+                   end
+                   else if (mod_8==4'h6)begin
+                      remainder=4'h5;
+                   end
+                   else begin
+                      remainder=mod_8;
+                   end
+            end  
+            if(divisor==4'h7) begin
+                   if (mod_8==4'h7)begin
+                      remainder=0;
+                   end
+                   else begin
+                      remainder=mod_8;
+                   end
+            end
+            if(divisor==4'h8) begin
+                  remainder=mod_8;
+            end 
+            if(divisor==4'h9) begin
+                   if (dividend==4'hf)begin
+                      remainder=4'h0;
+                   end
+                   else if (dividend==4'he)begin
+                      remainder=4'h1;
+                   end
+                   else if (dividend==4'hd)begin
+                      remainder=4'h2;
+                   end
+                   else if (dividend==4'hc)begin
+                      remainder=4'h3;
+                   end
+                   else if (dividend==4'hb)begin
+                      remainder=4'h4;
+                   end
+                   else if (dividend==4'ha)begin
+                      remainder=4'h5;
+                   end
+                   else if (dividend==4'h9)begin
+                      remainder=4'h6;
+                   end
+                   else begin
+                      remainder=dividend;
+                   end
+            end
+            if(divisor==4'ha) begin
+                   if (dividend==4'hf)begin
+                      remainder=4'h0;
+                   end
+                   else if (dividend==4'he)begin
+                      remainder=4'h1;
+                   end
+                   else if (dividend==4'hd)begin
+                      remainder=4'h2;
+                   end
+                   else if (dividend==4'hc)begin
+                      remainder=4'h3;
+                   end
+                   else if (dividend==4'hb)begin
+                      remainder=4'h4;
+                   end
+                   else if (dividend==4'ha)begin
+                      remainder=4'h5;
+                   end
+                   else begin
+                      remainder=dividend;
+                   end
+            end
+            if(divisor==4'hb) begin
+                   if (dividend==4'hf)begin
+                      remainder=4'h0;
+                   end
+                   else if (dividend==4'he)begin
+                      remainder=4'h2;
+                   end
+                   else if (dividend==4'hd)begin
+                      remainder=4'h4;
+                   end
+                   else if (dividend==4'hc)begin
+                      remainder=4'h6;
+                   end
+                   else if (dividend==4'hb)begin
+                      remainder=4'h8;
+                   end
+                   else begin
+                      remainder=dividend;
+                   end
+            end  
+             if(divisor==4'hc) begin
+                   if (dividend==4'hf)begin
+                      remainder=4'h0;
+                   end
+                   else if (dividend==4'he)begin
+                      remainder=4'hf;
+                   end
+                   else if (dividend==4'hd)begin
+                      remainder=4'h5;
+                   end
+                   else if (dividend==4'hc)begin
+                      remainder=4'ha;
+                   end
+                   else begin
+                      remainder=dividend;
+                   end
+            end 
+             if(divisor==4'hd) begin
+                   if (dividend==4'hf)begin
+                      remainder=4'h0;
+                   end
+                   else if (dividend==4'he)begin
+                      remainder=4'hf;
+                   end
+                   else if (dividend==4'hd)begin
+                      remainder=4'h8;
+                   end
+                   else begin
+                      remainder=dividend;
+                   end
+            end 
+            if(divisor==4'he) begin
+                   if (dividend==4'hf)begin
+                      remainder=4'h0;
+                   end
+                   else if (dividend==4'he)begin
+                      remainder=4'hf;
+                   end
+                   else begin
+                      remainder=dividend;
+                   end
+            end 
+            if(divisor==4'hf) begin
+                   if (dividend==4'hf)begin
+                      remainder=4'h0;
+                   end
+                   else begin
+                      remainder=dividend;
+                   end
+            end 
+            if(divisor==4'h0) begin
+                   remainder=4'h0;
+            end           
+      end
+ end //always
+endmodule // divider 

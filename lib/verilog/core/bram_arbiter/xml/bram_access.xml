@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nf:module xmlns:nf="http://www.NetFPGA.org/NF2_register_system" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.NetFPGA.org/NF2_register_system NF2_register_system.xsd ">
+	<nf:name>bram_access</nf:name>
+	<nf:prefix>bram_reg_access</nf:prefix>
+	<nf:location>udp</nf:location>
+	<nf:description>bram lookup for MPLS switch</nf:description>
+	<nf:blocksize>4096</nf:blocksize>
+	<nf:registers>
+		<nf:register>
+		</nf:register>
+	</nf:registers>
+	<nf:constants>
+	</nf:constants>
+	<nf:types>
+	</nf:types>
+</nf:module>

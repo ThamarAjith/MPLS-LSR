@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nf:module xmlns:nf="http://www.NetFPGA.org/NF2_register_system" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.NetFPGA.org/NF2_register_system NF2_register_system.xsd ">
+	<nf:name>learning_cam_switch</nf:name>
+	<nf:prefix>switch_op_lut</nf:prefix>
+	<nf:location>udp</nf:location>
+	<nf:description>Output port lookup for learning switch</nf:description>
+	<nf:blocksize>256</nf:blocksize>
+	<nf:registers>
+		<nf:register>
+			<nf:name>mac0_hi</nf:name>
+			<nf:description>Ports and MAC0 HI register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+		<nf:register>
+			<nf:name>mac0_lo</nf:name>
+			<nf:description>MAC0 LO register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+                <nf:register>
+			<nf:name>mac1_hi</nf:name>
+			<nf:description>Ports and MAC1 HI register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+		<nf:register>
+			<nf:name>mac1_lo</nf:name>
+			<nf:description>MAC1 LO register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+                <nf:register>
+			<nf:name>mac2_hi</nf:name>
+			<nf:description>Ports and MAC2 HI register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+		<nf:register>
+			<nf:name>mac2_lo</nf:name>
+			<nf:description>MAC2 LO register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+                <nf:register>
+			<nf:name>mac3_hi</nf:name>
+			<nf:description>Ports and MAC3 HI register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+		<nf:register>
+			<nf:name>mac3_lo</nf:name>
+			<nf:description>MAC3 LO register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+                <nf:register>
+			<nf:name>ls1_base</nf:name>
+			<nf:description>LS1 BASE register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+                <nf:register>
+			<nf:name>ls1_bound</nf:name>
+			<nf:description>LS1 BOUND register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+                <nf:register>
+			<nf:name>ls2_base</nf:name>
+			<nf:description>LS2 BASE register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+                <nf:register>
+			<nf:name>ls2_bound</nf:name>
+			<nf:description>LS2 BOUND register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+                <nf:register>
+			<nf:name>ls3_base</nf:name>
+			<nf:description>LS3 BASE register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+                <nf:register>
+			<nf:name>ls3_bound</nf:name>
+			<nf:description>LS3 BOUND register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+                <nf:register>
+			<nf:name>ls4_base</nf:name>
+			<nf:description>LS4 BASE register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+                <nf:register>
+			<nf:name>ls4_bound</nf:name>
+			<nf:description>LS4 BOUND register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+                <nf:register>
+			<nf:name>ld_base</nf:name>
+			<nf:description>LD BASE register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+                <nf:register>
+			<nf:name>ld_bound</nf:name>
+			<nf:description>LD BOUND register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+                <nf:register>
+			<nf:name>counter1_base</nf:name>
+			<nf:description>COUNTER1 BASE register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+                <nf:register>
+			<nf:name>counter2_base</nf:name>
+			<nf:description>COUNTER2 BASE register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+                <nf:register>
+			<nf:name>soft_offset</nf:name>
+			<nf:description>SOFTWARE OFFSET register</nf:description>
+			<nf:type>software32</nf:type>
+		</nf:register>
+		<nf:register>
+			<nf:name>not_for_us</nf:name>
+			<nf:description>NOT FOR US register</nf:description>
+			<nf:type>counter32</nf:type>
+		</nf:register>
+		<nf:register>
+			<nf:name>parity_error</nf:name>
+			<nf:description>PARITY ERROR register</nf:description>
+			<nf:type>counter32</nf:type>
+		</nf:register>
+		<nf:register>
+			<nf:name>ttl_error</nf:name>
+			<nf:description>TTL ERROR register</nf:description>
+			<nf:type>counter32</nf:type>
+		</nf:register>
+		<nf:register>
+			<nf:name>ls_error</nf:name>
+			<nf:description>LS ERROR register</nf:description>
+			<nf:type>counter32</nf:type>
+		</nf:register>
+                <nf:register>
+			<nf:name>ld_error</nf:name>
+			<nf:description>LD ERROR register</nf:description>
+			<nf:type>counter32</nf:type>
+		</nf:register>
+	</nf:registers>
+	<nf:constants>
+	</nf:constants>
+	<nf:types>
+	</nf:types>
+</nf:module>

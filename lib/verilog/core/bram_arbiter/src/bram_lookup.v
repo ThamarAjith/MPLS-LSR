@@ -1,0 +1,188 @@
+///////////////////////////////////////////////////////////////////////////////
+////
+// MPLS Switch BRAM lookup Module Enhancements,
+//   Developed by Algo-Logic Systems
+//   for Google, Copyright 2011, all rights reserved
+//   Distributed through the Apache 2.0 License
+// Based on code from NetFPGA Project
+//   Distributed through the NetBSD License
+//-----------------------------------------------------------
+//
+// Module: bram_lookup.v
+// Project: NF2.1 reference design
+// Description: BRAM lookup 
+//
+// Lookup operation for the destination mac address.
+//
+///////////////////////////////////////////////////////////////////////////////
+
+`timescale 1ns/1ns
+
+module bram_lookup
+     (
+    input  [7:0]                       wr_add_in,
+    input  [47:0]                      wr_data_in,
+    input  [7:0]                       rd_add_0,
+    input  [7:0]                       rd_add_1,
+    input                              wr_req,
+    input                              read_req_0,
+    input                              read_req_1,
+    output reg                         wr_ack,
+    output reg                         rd_ack_0,
+    output reg                         rd_ack_1,
+    output [47:0]                      mac_add_out,
+    output reg                         rd_valid_0,
+    output reg                         rd_valid_1,
+
+     // misc
+     input                              reset,
+     input                              clk);
+
+
+  reg         wea;
+  reg         wea_next;
+  reg [7:0]  br_add_in,br_add_in_next;
+  reg  [47:0] br_wr_data_in,br_wr_data_in_next;
+  reg rd_ack_0_next,rd_ack_1_next,wr_ack_next;
+  reg                         rd_valid_0_next;
+  reg                         rd_valid_1_next;
+  
+  
+   blk_mem     blk_mem
+         (.clka(clk),
+	  .wea(wea),
+	  .addra(br_add_in),
+	  .douta(mac_add_out),
+	  .dina(br_wr_data_in));
+			 
+ //----state machine to allocate  write and read ----------------//
+
+        parameter WAIT_FOR_LOAD = 0;
+	parameter WAIT_WRITE_ACK = 1;
+	parameter WAIT_COUNT_ACK_1 = 2;
+        parameter WAIT_COUNT_ACK_2 = 3;
+        parameter WAIT_B_LOAD = 4;
+        parameter WAIT_C_LOAD = 5;
+        parameter WAIT_D_LOAD = 6;
+        	
+   
+	reg[2:0]          req_state, req_state_next;
+		
+   always @(*) begin
+      req_state_next = req_state;
+      wea_next = wea;
+      wr_ack_next = wr_ack;
+      rd_ack_0_next = rd_ack_0;
+      rd_ack_1_next = rd_ack_1;
+      br_add_in_next = br_add_in;
+      br_wr_data_in_next = br_wr_data_in;
+      rd_valid_0_next = rd_valid_0;
+      rd_valid_1_next = rd_valid_1;
+       
+      case(req_state)
+
+        WAIT_FOR_LOAD: begin
+             
+                 
+             if(wr_req) begin 
+                  wea_next=1;
+                  br_add_in_next=wr_add_in;
+                  br_wr_data_in_next=wr_data_in;
+                  wr_ack_next=1;
+                  req_state_next      = WAIT_WRITE_ACK;
+             end
+             else if(read_req_0) begin
+                  br_add_in_next=rd_add_0;
+                  rd_ack_0_next = 1;
+                  req_state_next      = WAIT_COUNT_ACK_1;
+             end
+             else if(read_req_1) begin
+                  br_add_in_next=rd_add_1;
+                  rd_ack_1_next = 1;
+                  req_state_next      = WAIT_COUNT_ACK_2;
+             end
+             else begin
+                   rd_valid_1_next= 0;
+	           rd_valid_0_next= 0;
+             end 
+       end
+		  
+		 ///// write to look-up write fifo /
+        WAIT_WRITE_ACK: begin
+               if(wr_req) begin
+		    wr_ack_next=0;
+                    req_state_next      = WAIT_B_LOAD; 
+               end
+                
+          end
+		  
+       		  
+       WAIT_COUNT_ACK_1: begin
+                if(read_req_0) begin
+	            req_state_next      = WAIT_D_LOAD;
+                    rd_ack_0_next = 0;
+                end
+              end
+
+      	
+      WAIT_COUNT_ACK_2: begin
+                 if(read_req_1) begin
+	            req_state_next      = WAIT_C_LOAD;
+                    rd_ack_1_next = 0;
+                 end
+            end
+
+     WAIT_B_LOAD: begin
+               if(!wr_req) begin 
+		   wea_next=0;  
+                   req_state_next      = WAIT_FOR_LOAD;
+              end 
+         end
+   
+     WAIT_C_LOAD: begin
+               if(!read_req_1) begin
+                   rd_valid_1_next= 1; 
+		   req_state_next      = WAIT_FOR_LOAD;
+               end 
+         end
+    
+     WAIT_D_LOAD: begin
+               if(!read_req_0) begin
+                   rd_valid_0_next = 1; 
+		   req_state_next = WAIT_FOR_LOAD;
+              end
+      end
+
+       		  
+      endcase // case(state)
+   end // always @ (*)
+
+   always @(posedge clk) begin
+      if(reset) begin
+         req_state <= WAIT_FOR_LOAD;
+         rd_ack_0<= 0;
+         rd_ack_1 <= 0;
+         wr_ack <= 0;
+         wea <= 0;
+         br_add_in <= 0;
+         br_wr_data_in <= 0;
+         rd_valid_0 <= 0;
+         rd_valid_1 <= 0;
+      end
+      else begin
+         req_state <= req_state_next;
+         rd_ack_0 <= rd_ack_0_next;
+         rd_ack_1 <= rd_ack_1_next;
+         wr_ack <= wr_ack_next;
+         wea <= wea_next;
+         br_add_in <= br_add_in_next;
+         br_wr_data_in <= br_wr_data_in_next;
+         rd_valid_0 <= rd_valid_0_next;
+         rd_valid_1 <= rd_valid_1_next;
+      end
+   end 
+	
+
+ 
+			 
+endmodule // user_data_path
